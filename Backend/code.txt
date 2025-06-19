@@ -1,0 +1,77 @@
+API.js
+
+const express = require('express');
+const mysql = require('mysql2/promise');
+const cors = require('cors');
+
+const router = express.Router();
+
+// Create a MySQL pool for better performance
+const pool = mysql.createPool({
+  host: 'localhost',
+  port: 3306,
+  user: 'root',
+  password: 'mysql',
+  database: 'ThermalData',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+// Enable CORS
+router.use(cors());
+
+// Fetch all HNs
+router.get('/hns', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT DISTINCT HN FROM patients');
+    res.json({ hns: rows.map(row => row.HN) });
+  } catch (error) {
+    console.error("Error fetching HNs:", error);
+    res.status(500).json({ error: "Database error while fetching HNs" });
+  }
+});
+
+// Fetch dashboard data
+router.get('/dashboard', async (req, res) => {
+  const { hn, year, month } = req.query;
+
+  // Validate input
+  if (!year || !month) {
+    return res.status(400).json({ error: "Year and month are required" });
+  }
+
+  try {
+    const [results] = await pool.query(`
+      SELECT HN, COUNT(*) AS total_predictions, AVG(temperature) AS avg_temperature, AVG(humidity) AS avg_humidity 
+      FROM predictions 
+      WHERE YEAR(date) = ? AND MONTH(date) = ? ${hn !== 'all' ? 'AND HN = ?' : ''}
+      GROUP BY HN
+    `, hn !== 'all' ? [year, month, hn] : [year, month]);
+
+    res.json({ total_patients: results.length, predictions_data: results });
+  } catch (error) {
+    console.error("Error fetching dashboard data:", error);
+    res.status(500).json({ error: "Database error while fetching dashboard data" });
+  }
+});
+
+// Fetch prediction history for a specific HN
+router.get('/predictions', async (req, res) => {
+  const { hn } = req.query;
+
+  // Validate input
+  if (!hn) {
+    return res.status(400).json({ error: "HN is required" });
+  }
+
+  try {
+    const [rows] = await pool.query('SELECT date, prediction, temperature, humidity FROM predictions WHERE HN = ?', [hn]);
+    res.json({ predictions: rows });
+  } catch (error) {
+    console.error("Error fetching prediction history:", error);
+    res.status(500).json({ error: "Database error while fetching prediction history" });
+  }
+});
+
+module.exports = router;
